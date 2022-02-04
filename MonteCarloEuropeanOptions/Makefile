@@ -10,10 +10,13 @@ CXXFLAGS=-g -O3 -fimf-precision=low -qopenmp -restrict -qopt-report=5  -fimf-dom
 
 LDFLAGS=-L${TBBROOT}/lib/intel64/gcc4.4 -ltbbmalloc -Bstatic -L${MKLROOT}/lib/intel64/ -Wl,--start-group -lmkl_intel_ilp64 -lmkl_sequential -lmkl_core -Wl,--end-group
 
-all: MonteCarloInsideBlockingDP.avx512 
+all: MonteCarloInsideBlockingDP.avx512 MonteCarloInsideBlockingDP.avx2
 
 MonteCarloInsideBlockingDP.avx512: MonteCarloInsideBlockingDP.cpp
 	$(CXX) $^ -xCORE-AVX512 -qopt-zmm-usage=high $(LDFLAGS) $(CXXFLAGS) -o $@
 
+MonteCarloInsideBlockingDP.avx2: MonteCarloInsideBlockingDP.cpp
+	$(CXX) $^ -march=core-avx2 $(LDFLAGS) $(CXXFLAGS) -o $@
+
 clean	:
-	rm -f  *.optrpt MonteCarloInsideBlockingDP.avx512
+	rm -f  *.optrpt MonteCarloInsideBlockingDP.avx512 MonteCarloInsideBlockingDP.avx2

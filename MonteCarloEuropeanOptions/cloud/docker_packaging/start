@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# Copyright (C) 2022 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+
+LOG_FILE="/app/log"
+
+log() { [ -n "${1}" ] && echo -e "${1}" >> ${LOG_FILE}; }
+
+[ -z "${PAUSE_TIME}" ] && PAUSE_TIME=60
+[ -z "${PR}" ] && PR=1
+
+log "PAUSE_TIME=${PAUSE_TIME}\nPR=${PR}\nPUSHGWIP=${PUSHGWIP}"
+
+while [ ! -f /app/stop ]; do
+	if [ "${USE_AVX512}" == "1" ] && [ "$(grep -c avx512 /proc/cpuinfo)" != "0" ]; then
+		r=$(./run --withAVX512 ${PR})
+		log "${r}"
+		if [ "${PUSHGWIP}" != "" ]; then
+			echo "time_elapsed ${r}" | curl --connect-timeout 5 --data-binary @- "http://${PUSHGWIP}:9091/metrics/job/montecarlo/instance/avx512"
+		fi
+	else
+		r=$(./run ${PR})
+		log "${r}"
+		if [ "${PUSHGWIP}" != "" ]; then
+			echo "time_elapsed ${r}" | curl --connect-timeout 5 --data-binary @- "http://${PUSHGWIP}:9091/metrics/job/montecarlo/instance/avx2"
+		fi
+	fi
+	sleep ${PAUSE_TIME}
+done

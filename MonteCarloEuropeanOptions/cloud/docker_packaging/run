@@ -1,0 +1,77 @@
+#!/bin/bash
+#
+# Copyright (C) 2022 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Set to 1 to enable debugging
+DEBUG=1
+
+LOG_FILE="/app/log"
+
+export LD_LIBRARY_PATH=/app:${LD_LIBRARY_PATH}
+
+log() { [ -n "${1}" ] && echo -e "${1}" >> ${LOG_FILE}; }
+
+print_usage() { echo "USAGE: run [--withAVX512] <processes>"; }
+
+check_assigned_cpus()
+{
+	CPUSET="$(cat /sys/fs/cgroup/cpuset/cpuset.cpus)"
+	CPUS="$(echo "${CPUSET}" | awk '{ split($0,a,","); for (i in a) { split(a[i],b,"-"); print b[1]; if (b[2]!="") for (j=b[1]+1;j<=b[2];j++) print j; } }')"
+	log "CPUs assigned by CPU manager: CPUSET=${CPUSET} CPUS=$CPUS"
+}
+
+# Parse params
+[ -z "${1}" ] && print_usage && exit 1
+
+if [ "${1}" == "--withAVX512" ]; then
+	export withavx512="1"
+	export MKL_ENABLE_INSTRUCTIONS="AVX512"
+	if [ -z "${2}" ]; then
+		print_usage && exit 1
+	fi
+	export PR="${2}"
+else
+	export MKL_ENABLE_INSTRUCTIONS="AVX2"
+	export PR="${1}"
+fi
+
+check_assigned_cpus
+
+[ "${DEBUG}" == "1" ] && log "MKL_ENABLE_INSTRUCTIONS = ${MKL_ENABLE_INSTRUCTIONS}\nPR = ${PR}\nCPUS = ${CPUS}\nRunning"
+
+mkdir /app/tmp
+
+CPUSSELECTED="$(echo "$CPUS" | awk -v pr="$PR" ' { split($0,a," "); for (i=1;i<=pr;i++) { printf("%s\n",a[i]) } } ')"
+log "CPUSSELECTED=${CPUSSELECTED}"
+PR_STARTED="0"
+for i in ${CPUSSELECTED}; do
+	PR_STARTED=$((PR_STARTED+1))
+
+	TASKSET=""
+	[ "${USE_TASKSET}" == "1" ] && TASKSET="taskset -c $i"
+
+	if [ $withavx512 ]; then
+		avx="avx512"
+	else
+		avx="avx2"
+	fi
+
+	log "TASKSET=${TASKSET} avx=${avx}"
+
+	${TASKSET} ./MonteCarloInsideBlockingDP.${avx} 1 8192 262144 8k > "tmp/results$i.txt" 2>&1 &
+
+	[ "${PR_STARTED}" -ge "${PR}" ] && log "Number of started instances reached desired limit" && break
+done
+
+# Wait for test completion
+while [ "$(ps | awk ' $4=="MonteCarloInsid" { i++ } END { print i } ')" ]; do
+	[ "${DEBUG}" == "1" ] && log "."
+	sleep 1
+done
+
+cat tmp/results*.txt | grep Elapsed >> tmp/elapsedtimes.txt
+awk -v pr="${PR}" '{ s+=$4 } END { print s/pr }' tmp/elapsedtimes.txt
+
+rm -rf /app/tmp
